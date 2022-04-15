@@ -81,7 +81,7 @@ vector<string> splitmsg(string s) {
 }
 
 int main(int argc, char **argv) {
-    cout.flush();
+    std::cout.flush();
     
     string config_file = argv[1];
     string my_dir = argv[2];
@@ -151,8 +151,14 @@ int main(int argc, char **argv) {
     map<int, string> infile_name;
     // Map from sockfd to string
 
+    map<string, string> file_hash;
+    map<string, string> file_depth;
+    map<string, string> file_owneruid;
+    set<string> wanted_files;
+
     int all_got = 0;
     int d2sent = 0;
+    int files_needed = 0, files_received = 0;
 
     vector<string> to_be_sentReqs;
 
@@ -300,6 +306,7 @@ int main(int argc, char **argv) {
     }
 
     bool printed = false;
+    bool hashed = false;
 
     for(;;) {
         read_fds = master;
@@ -365,7 +372,7 @@ int main(int argc, char **argv) {
                         // printf("I received '%s' on socket %d$", buf, i);
 
                         string message(buf, buf+nbytes);
-                        cout << "Got this message " << message << endl;
+                        // cout << "Got this message " << message << endl;
 
                         if(!file_in[i]) {
                             int fsind = 0;
@@ -694,6 +701,30 @@ int main(int argc, char **argv) {
                                 // cout << out;
 
                                 rem_bytes[i] = 0;
+                                files_received++;
+
+                                // Calculate and store the MD5 hash here
+                                unsigned char hash[MD5_DIGEST_LENGTH];
+                                string filename = (pathname + "/" + infile_name[i]);
+                                string result = "";
+
+                                FILE *inFile = fopen(filename.c_str(), "rb");
+                                MD5_CTX mdContext;
+                                int rbytes;
+                                unsigned char data[1024];
+                                MD5_Init(&mdContext);
+
+                                while((rbytes = fread(data, 1, 1024, inFile)) != 0)
+                                    MD5_Update(&mdContext, data, rbytes);
+                                MD5_Final(hash, &mdContext);
+                                char buf[2*MD5_DIGEST_LENGTH];
+                                for(int i = 0; i < MD5_DIGEST_LENGTH; i++) {
+                                    sprintf(buf, "%02x", hash[i]);
+                                    result.append(buf);
+                                }
+                                fclose(inFile);
+
+                                file_hash[infile_name[i]] = result;
                             }
                         }
                     }
@@ -702,7 +733,7 @@ int main(int argc, char **argv) {
         
             if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !printed) break;
         }
-    
+
         if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !printed) {
             // cout << "Here" << endl;
             for(auto file : search_files) {
@@ -710,8 +741,13 @@ int main(int argc, char **argv) {
                 if(file_owners[file].empty() && d2file_owners[file].empty()) {
                     d = 0;
                     n_uid = 0;
+                    file_hash[file] = "0";
+                    file_depth[file] = to_string(d);
+                    file_owneruid[file] = to_string(n_uid);
                 }
                 else if(!file_owners[file].empty()) {
+                    files_needed++;
+                    wanted_files.insert(file);
                     auto it = min_element(file_owners[file].begin(), file_owners[file].end());
                     n_uid = *it;
 
@@ -722,8 +758,12 @@ int main(int argc, char **argv) {
                     if(send(uid2sockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
                         // perror("send");
                     }
+                    file_depth[file] = to_string(d);
+                    file_owneruid[file] = to_string(n_uid);
                 }
                 else {
+                    files_needed++;
+                    wanted_files.insert(file);
                     d = 2;
                     auto it = min_element(d2file_owners[file].begin(), d2file_owners[file].end());
                     n_uid = get<0>(*it);
@@ -777,13 +817,32 @@ int main(int argc, char **argv) {
                             // perror("send");
                         }
                     }
+                    file_depth[file] = to_string(d);
+                    file_owneruid[file] = to_string(n_uid);
                 }
-                
-                string out = "Found " + file + " at " + to_string(n_uid) + " with MD5 0 at depth " + to_string(d);
-                cout << out << endl;
+
+                // string out = "Found " + file + " at " + to_string(n_uid) + " with MD5 0 at depth " + to_string(d);
+                // cout << out << endl;
             }
             printed = true;
             // break;
+
+            // If at this point files needed is zero then just sort everyone and print the default message here else do the printing
+            // in the next block
+            if(files_needed == 0) {
+                for(auto file : search_files) {
+                    string out = "Found " + file + " at 0 with MD5 0 at depth 0";
+                    cout << out << endl;
+                }
+            }
+        }
+    
+        if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && printed && (files_needed == files_received) && (files_needed != 0) && !hashed) {
+            for(auto file : search_files) {
+                string out = "Found " + file + " at " + file_owneruid[file] + " with MD5 " + file_hash[file] + " at depth " + file_depth[file];
+                std::cout << out << endl;
+            }
+            hashed = true;
         }
     }
 

@@ -132,9 +132,17 @@ int main(int argc, char **argv) {
     int all_got = 0;
     bool all_printed = false;
 
-    bool file_in = false;
-    int rem_bytes;
-    string infile_name;
+    // bool file_in = false;
+    map<int, bool> file_in;
+    // Map from sockfd to bool
+    
+    // int rem_bytes;
+    map<int, int> rem_bytes;
+    // Map from sockfd to int
+
+    // string infile_name;
+    map<int, string> infile_name;
+    // Map from sockfd to string
 
     for(ll i = 0; i < num_neighbors; i++) {
         ll n_id, n_port;
@@ -342,7 +350,7 @@ int main(int argc, char **argv) {
                         string message(buf, buf+nbytes);
                         // cout << message << endl;
 
-                        if(!file_in) {
+                        if(!file_in[i]) {
                             int fsind = 0;
                             vector<string> msgs = splitmsg(message);
                             // This function will be now adapted to fit for both
@@ -461,16 +469,16 @@ int main(int argc, char **argv) {
                                         }
                                     }
                                     else if(words[0] == "FILENEXT") {
-                                        file_in = true;
-                                        rem_bytes = stoi(words[2]);
-                                        infile_name = words[1];
+                                        file_in[i] = true;
+                                        rem_bytes[i] = stoi(words[2]);
+                                        infile_name[i] = words[1];
                                         all_got++;
                                         break;
                                     }
                                 }
                             }
 
-                            if(file_in) {
+                            if(file_in[i]) {
                                 for(int i = 0; i < message.length(); i++) {
                                     if(message.substr(i, 8) == "FILENEXT") {
                                         fsind = i;
@@ -493,7 +501,7 @@ int main(int argc, char **argv) {
                                 }
                                 else if(info.st_mode & S_IFDIR) {}
 
-                                FILE *fd = fopen((pathname + "/" + infile_name).c_str(), "ab+");
+                                FILE *fd = fopen((pathname + "/" + infile_name[i]).c_str(), "ab+");
 
                                 string out(buf+fsind, buf+nbytes);
                                 // cout << out;
@@ -501,7 +509,7 @@ int main(int argc, char **argv) {
                                 fwrite(buf+fsind, sizeof(char), nbytes-fsind, fd);
                                 fclose(fd);
 
-                                rem_bytes -= (nbytes-fsind);
+                                rem_bytes[i] -= (nbytes-fsind);
                             }
                         }
                         else {
@@ -516,7 +524,7 @@ int main(int argc, char **argv) {
                             // }
 
                             // if(eof == -1) {
-                            if(rem_bytes > nbytes) {
+                            if(rem_bytes[i] > nbytes) {
 
                                 struct stat info;
                                 string pathname = (my_dir + "Downloaded");
@@ -526,14 +534,14 @@ int main(int argc, char **argv) {
                                 }
                                 else if(info.st_mode & S_IFDIR) {}
 
-                                FILE *fd = fopen((pathname + "/" + infile_name).c_str(), "ab+");
+                                FILE *fd = fopen((pathname + "/" + infile_name[i]).c_str(), "ab+");
 
                                 fwrite(buf, sizeof(char), nbytes, fd);
 
                                 fclose(fd);
                                 string out(buf, buf+nbytes);
                                 // cout << out;
-                                rem_bytes -= nbytes;
+                                rem_bytes[i] -= nbytes;
                             }
                             else {
                                 struct stat info;
@@ -544,19 +552,19 @@ int main(int argc, char **argv) {
                                 }
                                 else if(info.st_mode & S_IFDIR) {}
 
-                                FILE *fd = fopen((pathname + "/" + infile_name).c_str(), "ab+");
+                                FILE *fd = fopen((pathname + "/" + infile_name[i]).c_str(), "ab+");
 
                                 // fwrite(buf, sizeof(char), eof+1, fd);
-                                fwrite(buf, sizeof(char), rem_bytes, fd);
+                                fwrite(buf, sizeof(char), rem_bytes[i], fd);
 
                                 fclose(fd);
-                                file_in = false;
+                                file_in[i] = false;
 
                                 // string out(buf, buf+eof+1);
-                                string out(buf, buf+rem_bytes);
+                                string out(buf, buf+rem_bytes[i]);
                                 // cout << out;
 
-                                rem_bytes = 0;
+                                rem_bytes[i] = 0;
                             }
                         }
                     }
