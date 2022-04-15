@@ -132,6 +132,7 @@ int main(int argc, char **argv) {
     set<int> d2connected;
 
     map<int, int> d2_uid2outsockfd;
+    map<int, int> d2_outsockfd2id;
     // UID to Status
     // map<int, tuple<int, int, int>> d2neighbor_info;
 
@@ -277,11 +278,10 @@ int main(int argc, char **argv) {
 
             for(auto file : search_files) {
                 message += "," + file;
-                len += file.length() + 1;
             }
             
             message += '$';
-            if(send(client_sockfd, message.c_str(), len+1, 0) == -1) {
+            if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
                 // perror("send");
             }
 
@@ -336,12 +336,11 @@ int main(int argc, char **argv) {
 
                         for(auto file : search_files) {
                             message += "," + file;
-                            len += file.length() + 1;
                         }
 
                         message += '$';
 
-                        if(send(newfd, message.c_str(), len+1, 0) == -1) {
+                        if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
                             perror("send");
                         }
 
@@ -366,7 +365,7 @@ int main(int argc, char **argv) {
                         // printf("I received '%s' on socket %d$", buf, i);
 
                         string message(buf, buf+nbytes);
-                        if(sockfd2ID[i] != 1) cout << "Got this message " << message << endl;
+                        cout << "Got this message " << message << endl;
 
                         if(!file_in[i]) {
                             int fsind = 0;
@@ -385,10 +384,17 @@ int main(int argc, char **argv) {
                                     int n_id, n_port, n_uid;
 
                                     n_id = stoi(words[1]);
-                                    sockfd2ID[i] = n_id;
                                     n_port = stoi(words[2]);
                                     n_uid = stoi(words[3]);
 
+                                    bool d2 = true;
+                                    for(auto n : neighbors) {
+                                        if(n.first == n_id) d2 = false;
+                                    }
+
+                                    if(d2) continue;
+                                    
+                                    sockfd2ID[i] = n_id;
                                     uid2sockfd[n_uid] = i;
 
                                     get<0>(neighbor_info[n_id]) = i;
@@ -744,6 +750,7 @@ int main(int argc, char **argv) {
 
                             d2connected.insert(n_uid);
                             d2_uid2outsockfd[n_uid] = client_sockfd;
+                            d2_outsockfd2id[client_sockfd] = get<1>(*it);
                             string message = "FILEREQ," + to_string(uid) + "," + to_string(id) + "," + file + '$';
                             // cout << "The socketfd is " << client_sockfd << endl;
                             if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
