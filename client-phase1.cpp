@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
     fin >> num_neighbors;
 
     vector<pair<int, int>> neighbors;
+    // id, port
     
     map<int, tuple<int, int, int>> neighbor_info;
     // Info about the neighbor given its ID
