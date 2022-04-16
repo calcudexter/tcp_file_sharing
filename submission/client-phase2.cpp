@@ -248,7 +248,7 @@ int main(int argc, char **argv) {
             }
             
             message += '$';
-            if(send(client_sockfd, message.c_str(), len+1, 0) == -1) {
+            if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
                 // perror("send");
             }
 
@@ -306,7 +306,7 @@ int main(int argc, char **argv) {
 
                         message += '$';
 
-                        if(send(newfd, message.c_str(), len+1, 0) == -1) {
+                        if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
                             perror("send");
                         }
 
