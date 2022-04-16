@@ -105,6 +105,10 @@ int main(int argc, char **argv) {
 
     sort(my_files.begin(), my_files.end());
 
+    for(auto f : my_files) {
+        cout << f << endl;
+    }
+
     int num_neighbors;
     fin >> num_neighbors;
 
@@ -129,6 +133,7 @@ int main(int argc, char **argv) {
     // UID to Status
     map<int, tuple<int, int, int>> d2neighbor_info;
     bool all_responded = false, all_requested = false, all_2responded = false;
+    bool phase1printed = false;
 
     int d2sent = 0;
 
@@ -155,6 +160,8 @@ int main(int argc, char **argv) {
     for(ll i = 0; i < num_files_down; i++) {
         fin >> search_files[i];
     }
+
+    sort(search_files, search_files+num_files_down);
 
     // ----------------------
     // Socket programming starts here
@@ -252,15 +259,14 @@ int main(int argc, char **argv) {
             }
 
             message = "REQ," + to_string(uid) + "," + to_string(id) + "," + to_string(num_files_down);
-            int len = message.length();
 
             for(auto file : search_files) {
                 message += "," + file;
-                len += file.length() + 1;
+                // len += file.length() + 1;
             }
             
             message += '$';
-            if(send(client_sockfd, message.c_str(), len+1, 0) == -1) {
+            if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
                 // perror("send");
             }
 
@@ -309,16 +315,13 @@ int main(int argc, char **argv) {
 
                         message = "REQ," + to_string(uid) + "," + to_string(id) + "," + to_string(num_files_down);
 
-                        int len = message.length();
-
                         for(auto file : search_files) {
                             message += "," + file;
-                            len += file.length() + 1;
                         }
 
                         message += '$';
 
-                        if(send(newfd, message.c_str(), len+1, 0) == -1) {
+                        if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
                             perror("send");
                         }
 
@@ -349,7 +352,8 @@ int main(int argc, char **argv) {
 
                         // Loop to clean the messages
                         for(int i = 1; i < msgs.size(); i++) {
-                            msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
+                            if(msgs[i].length())
+                                msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
                         }
 
                         chats[sockfd2ID[i]].insert(chats[sockfd2ID[i]].end(), msgs.begin(), msgs.end());
@@ -385,6 +389,8 @@ int main(int argc, char **argv) {
                                     if(send(i, message.c_str(), message.length()+1, 0) == -1) {
                                         perror("send");
                                     }
+
+                                    // cout << "I am " << id << " sending to " << n_id << " : " << message << endl;
 
                                     // Send this message to all of its neighbors too except the requestor
                                     string forward = "2REQ," + to_string(uid) + "," + to_string(id) + "," + msg.substr(4, msg.length()-4) + '$';
@@ -425,6 +431,8 @@ int main(int argc, char **argv) {
                                         }
                                     }
                                 
+                                    // cout << "I am " << id << " got response from " << n_id << endl;
+
                                     unresponded.erase(n_id);
                                     if(unresponded.empty()) all_responded = true;
                                 }
@@ -506,40 +514,54 @@ int main(int argc, char **argv) {
                                     for(auto d2nb : d2neighbors) {
                                         // cout << "Checking for the neighbor " << d2nb << endl;
                                         if(d2neighbor_status[d2nb] == 1) all_2responded = false;
-                                    }
+                                    } 
                                 }
+                                // else {
+                                //     cout << "Got this message : " << msg << " ; length is " << msg.length() << endl;
+                                // }
                             }
                         }
                     }
                 }
             }
         
-            if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1))) break;
+            // if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1))) break;
         }
-    
-        if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1))) break;
-    }
 
-    // Now print all the resultant output
+        if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !phase1printed) {
+            // Now print all the resultant output
+            cout << "";
+            for(auto neighbor : neighbors) {
+                int n_id = neighbor.first;
+                int n_port = neighbor.second;
+                int n_uid = get<2>(neighbor_info[n_id]);
 
-    for(auto file : search_files) {
-        int d = 1, n_uid;
-        if(file_owners[file].empty() && d2file_owners[file].empty()) {
-            d = 0;
-            n_uid = 0;
+                cout << "Connected to " << n_id << " with unique-ID " << n_uid << " on port " << n_port << endl;
+            }
+
+            for(auto file : search_files) {
+                int d = 1, n_uid;
+                if(file_owners[file].empty() && d2file_owners[file].empty()) {
+                    d = 0;
+                    n_uid = 0;
+                }
+                else if(!file_owners[file].empty()) {
+                    auto it = min_element(file_owners[file].begin(), file_owners[file].end());
+                    n_uid = *it;
+                }
+                else {
+                    d = 2;
+                    auto it = min_element(d2file_owners[file].begin(), d2file_owners[file].end());
+                    n_uid = get<0>(*it);
+                }
+                
+                string out = "Found " + file + " at " + to_string(n_uid) + " with MD5 0 at depth " + to_string(d);
+                cout << out << endl;
+            }
+
+            phase1printed = true;
+            // break;
         }
-        else if(!file_owners[file].empty()) {
-            auto it = min_element(file_owners[file].begin(), file_owners[file].end());
-            n_uid = *it;
-        }
-        else {
-            d = 2;
-            auto it = min_element(d2file_owners[file].begin(), d2file_owners[file].end());
-            n_uid = get<0>(*it);
-        }
-        
-        string out = "Found " + file + " at " + to_string(n_uid) + " with MD5 0 at depth " + to_string(d);
-        cout << out << endl;
     }
 
     return 0;
