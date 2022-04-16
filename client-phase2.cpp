@@ -104,6 +104,10 @@ int main(int argc, char **argv) {
 
     sort(my_files.begin(), my_files.end());
 
+    for(auto f : my_files) {
+        cout << f << endl;
+    }
+
     int num_neighbors;
     fin >> num_neighbors;
 
@@ -143,6 +147,8 @@ int main(int argc, char **argv) {
     for(ll i = 0; i < num_files_down; i++) {
         fin >> search_files[i];
     }
+
+    sort(search_files, search_files+num_files_down);
 
     // ----------------------
     // Socket programming starts here
@@ -248,7 +254,7 @@ int main(int argc, char **argv) {
             }
             
             message += '$';
-            if(send(client_sockfd, message.c_str(), len+1, 0) == -1) {
+            if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
                 // perror("send");
             }
 
@@ -306,7 +312,7 @@ int main(int argc, char **argv) {
 
                         message += '$';
 
-                        if(send(newfd, message.c_str(), len+1, 0) == -1) {
+                        if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
                             perror("send");
                         }
 
@@ -337,7 +343,8 @@ int main(int argc, char **argv) {
 
                         // Loop to clean the messages
                         for(int i = 1; i < msgs.size(); i++) {
-                            msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
+                            if(msgs[i].length())
+                                msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
                         }
 
                         chats[sockfd2ID[i]].insert(chats[sockfd2ID[i]].end(), msgs.begin(), msgs.end());
@@ -404,6 +411,14 @@ int main(int argc, char **argv) {
     }
 
     // Now print all the resultant output
+
+    for(auto neighbor : neighbors) {
+        int n_id = neighbor.first;
+        int n_port = neighbor.second;
+        int n_uid = get<2>(neighbor_info[n_id]);
+
+        cout << "Connected to " << n_id << " with unique-ID " << n_uid << " on port " << n_port << endl;
+    }
 
     for(auto file : search_files) {
         int d = 1, n_uid;

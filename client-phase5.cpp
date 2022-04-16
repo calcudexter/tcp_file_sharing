@@ -20,6 +20,7 @@
 #include <set>
 #include <sys/stat.h>
 #include <openssl/md5.h>
+#include <queue>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -107,6 +108,10 @@ int main(int argc, char **argv) {
 
     sort(my_files.begin(), my_files.end());
 
+    for(auto f : my_files) {
+        cout << f << endl;
+    }
+
     int num_neighbors;
     fin >> num_neighbors;
 
@@ -129,15 +134,19 @@ int main(int argc, char **argv) {
     set<int> unrequested;
     set<int> d2neighbors;
     map<int, int> d2neighbor_status;
+    // UID to Status
     set<int> d2connected;
 
     map<int, int> d2_uid2outsockfd;
     map<int, int> d2_outsockfd2id;
-    // UID to Status
+
+    map<int, queue<string>> sockfd2filereq;
     // map<int, tuple<int, int, int>> d2neighbor_info;
 
     bool all_responded = false, all_requested = false, all_2responded = false;
 
+    int expected_2REQs = 0, expected_2RESPs = num_neighbors*(num_neighbors-1), expected_DRESPs = 0;
+    int received_2REQs = 0, received_2RESPs = 0, received_DRESPs = 0;
 
     // bool file_in = false;
     map<int, bool> file_in;
@@ -183,6 +192,8 @@ int main(int argc, char **argv) {
     for(ll i = 0; i < num_files_down; i++) {
         fin >> search_files[i];
     }
+
+    sort(search_files, search_files+num_files_down);
 
     // ----------------------
     // Socket programming starts here
@@ -274,7 +285,7 @@ int main(int argc, char **argv) {
                 continue;
             }
 
-            string message = "INFO," + to_string(id) + "," + to_string(port) + "," + to_string(uid) + '$';
+            string message = "INFO," + to_string(id) + "," + to_string(port) + "," + to_string(uid) + "," + to_string(num_neighbors) + '$';
             if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
                 // perror("send");
             }
@@ -332,7 +343,8 @@ int main(int argc, char **argv) {
                             fdmax = newfd;
                         }
 
-                        string message = "INFO," + to_string(id) + "," + to_string(port) + "," + to_string(uid) + '$';
+                        // string message = "INFO," + to_string(id) + "," + to_string(port) + "," + to_string(uid) + '$';
+                        string message = "INFO," + to_string(id) + "," + to_string(port) + "," + to_string(uid) + "," + to_string(num_neighbors) + '$';
                         if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
                             // perror("send");
                         }
@@ -372,7 +384,8 @@ int main(int argc, char **argv) {
                         // printf("I received '%s' on socket %d$", buf, i);
 
                         string message(buf, buf+nbytes);
-                        // cout << "Got this message " << message << endl;
+                        // cout << "Got this message " << message << endl << endl;
+                        // if(sockfd2ID[i] == 4) cout << message << endl;
 
                         if(!file_in[i]) {
                             int fsind = 0;
@@ -380,19 +393,24 @@ int main(int argc, char **argv) {
 
                             // Loop to clean the messages
                             for(int i = 1; i < msgs.size(); i++) {
-                                msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
+                                if(msgs[i].length())
+                                    msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
                             }
 
                             // chats[sockfd2ID[i]].insert(chats[sockfd2ID[i]].end(), msgs.begin(), msgs.end());
                             
                             for(auto msg : msgs) {
                                 vector<string> words = splitstring(msg);
+
+                                // if(sockfd2ID[i] == 4 && id == 5) cout << "The first word was " << words[0] << endl;
+
                                 if(words[0] == "INFO") {
-                                    int n_id, n_port, n_uid;
+                                    int n_id, n_port, n_uid, n_num_neigh;
 
                                     n_id = stoi(words[1]);
                                     n_port = stoi(words[2]);
                                     n_uid = stoi(words[3]);
+                                    n_num_neigh = stoi(words[4]);
 
                                     bool d2 = true;
                                     for(auto n : neighbors) {
@@ -400,6 +418,9 @@ int main(int argc, char **argv) {
                                     }
 
                                     if(d2) continue;
+
+                                    expected_2REQs += (n_num_neigh-1);
+                                    expected_DRESPs += (n_num_neigh-1);
                                     
                                     sockfd2ID[i] = n_id;
                                     uid2sockfd[n_uid] = i;
@@ -475,6 +496,7 @@ int main(int argc, char **argv) {
                                         if(unresponded.empty()) all_responded = true;
                                     }
                                     else if(words[0] == "2REQ") {
+                                        received_2REQs++;
                                         int hop_uid = stoi(words[1]), hop_id = stoi(words[2]), src_uid = stoi(words[3]), src_id = stoi(words[4]), num_files = stoi(words[5]);
 
                                         string message = "2RESP," + to_string(uid) + "," + to_string(id) + "," + to_string(port) + "," + to_string(src_uid) + "," + to_string(src_id) + "," + to_string(num_files);
@@ -496,6 +518,7 @@ int main(int argc, char **argv) {
 
                                     }
                                     else if(words[0] == "2RESP") {
+                                        received_2RESPs++;
                                         // Send this to the src again directly
                                         int src_uid = stoi(words[1]), src_id = stoi(words[2]), src_port = stoi(words[3]), dest_uid = stoi(words[4]), dest_id = stoi(words[5]), num_files = stoi(words[6]);
 
@@ -524,6 +547,7 @@ int main(int argc, char **argv) {
                                         d2sent++;
                                     }
                                     else if(words[0] == "DRESP") {
+                                        received_DRESPs++;
                                         // Update the ownership
                                         int src_uid = stoi(words[1]), src_id = stoi(words[2]), src_port = stoi(words[3]), num_files = stoi(words[4]);
 
@@ -555,6 +579,7 @@ int main(int argc, char **argv) {
                                         }
                                     }
                                     else if(words[0] == "FILEREQ") {
+                                        // cout << msg << endl;
                                         int n_uid = stoi(words[1]), n_id = stoi(words[2]);
                                         string fn = words[3];
 
@@ -574,24 +599,6 @@ int main(int argc, char **argv) {
                                         while ( (num_bytes = fread(file_data, sizeof(char), 127, fd)) > 0)
                                         {
                                             int offset = 0, sent;
-                                            // if(uid2sockfd[n_uid]) {
-                                                // while ((sent = send(uid2sockfd[n_uid], file_data + offset, num_bytes, 0)) > 0
-                                                //     || (sent == -1 && errno == EINTR) ) {
-                                                //         if (sent > 0) {
-                                                //             offset += sent;
-                                                //             num_bytes -= sent;
-                                                //         }
-                                                // }
-                                            // }
-                                            // else {
-                                            //     while ((sent = send(i, file_data + offset, num_bytes, 0)) > 0
-                                            //         || (sent == -1 && errno == EINTR) ) {
-                                            //             if (sent > 0) {
-                                            //                 offset += sent;
-                                            //                 num_bytes -= sent;
-                                            //             }
-                                            //     }
-                                            // }
 
                                             while ((sent = send(i, file_data + offset, num_bytes, 0)) > 0
                                                 || (sent == -1 && errno == EINTR) ) {
@@ -603,12 +610,16 @@ int main(int argc, char **argv) {
                                         }
                                     }
                                     else if(words[0] == "FILENEXT") {
+                                        // if(id == 4) cout << msg << endl;
                                         file_in[i] = true;
                                         rem_bytes[i] = stoi(words[2]);
                                         infile_name[i] = words[1];
                                         all_got++;
                                         break;
                                     }
+                                    // else {
+                                        // cout << "Received this : " << msg << endl;
+                                    // }
                                 }
                             }
 
@@ -640,26 +651,18 @@ int main(int argc, char **argv) {
                                 FILE *fd = fopen((pathname + "/" + infile_name[i]).c_str(), "ab+");
 
                                 string out(buf+fsind, buf+nbytes);
-                                // cout << out;
+                                // cout << "637 : File data received " << out << endl;
 
                                 fwrite(buf+fsind, sizeof(char), nbytes-fsind, fd);
                                 fclose(fd);
+
+                                // cout << "642 : Successfully written" << endl;
 
                                 rem_bytes[i] -= (nbytes-fsind);
                             }
                         }
                         else {
-                            // int eof = -1;
-                            // Will use rem bytes next time
-
-                            // for(int i = 0; i < message.length(); i++) {
-                            //     if(message[i] == EOF) {
-                            //         eof = i;
-                            //         break;
-                            //     }
-                            // }
-
-                            // if(eof == -1) {
+                            // cout << "Currently receiving " << infile_name[i] << " here" << endl;
                             if(rem_bytes[i] > nbytes) {
 
                                 struct stat info;
@@ -672,11 +675,13 @@ int main(int argc, char **argv) {
 
                                 FILE *fd = fopen((pathname + "/" + infile_name[i]).c_str(), "ab+");
 
-                                fwrite(buf, sizeof(char), nbytes, fd);
-
-                                fclose(fd);
                                 string out(buf, buf+nbytes);
-                                // cout << out;
+                                // cout << "661 : File data received " << out << endl;
+
+                                fwrite(buf, sizeof(char), nbytes, fd);
+                                fclose(fd);
+
+                                // cout << "666 : Successfully written" << endl;
                                 rem_bytes[i] -= nbytes;
                             }
                             else {
@@ -691,17 +696,75 @@ int main(int argc, char **argv) {
                                 FILE *fd = fopen((pathname + "/" + infile_name[i]).c_str(), "ab+");
 
                                 // fwrite(buf, sizeof(char), eof+1, fd);
-                                fwrite(buf, sizeof(char), rem_bytes[i], fd);
-
-                                fclose(fd);
-                                file_in[i] = false;
-
+                                
                                 // string out(buf, buf+eof+1);
                                 string out(buf, buf+rem_bytes[i]);
-                                // cout << out;
+                                // cout << "684 : File data received " << out << endl;
+
+                                fwrite(buf, sizeof(char), rem_bytes[i], fd);
+                                fclose(fd);
+
+                                if(nbytes > rem_bytes[i]){
+                                    string remainder(buf+rem_bytes[i], buf+nbytes-2);
+                                    // cout << "The remaining part of the message is : " << remainder << endl;
+
+                                    
+                                    // It would definitely be a file request
+                                    vector<string> fwords = splitstring(remainder);
+
+                                    int n_uid = stoi(fwords[1]), n_id = stoi(fwords[2]);
+                                    string fn = fwords[3];
+
+                                    uintmax_t fsz = fs::file_size(my_dir + fn);
+                                    
+                                    string message = "FILENEXT," + fn + "," + to_string(fsz) + '$';
+
+                                    if(send(i, message.c_str(), message.length()+1, 0) == -1) {
+                                        perror("send");
+                                    }
+
+                                    FILE *fd = fopen((my_dir + fn).c_str(), "rb");
+
+                                    char file_data[128];
+
+                                    size_t num_bytes = 0;
+                                    while ( (num_bytes = fread(file_data, sizeof(char), 127, fd)) > 0)
+                                    {
+                                        int offset = 0, sent;
+
+                                        while ((sent = send(i, file_data + offset, num_bytes, 0)) > 0
+                                            || (sent == -1 && errno == EINTR) ) {
+                                                if (sent > 0) {
+                                                    offset += sent;
+                                                    num_bytes -= sent;
+                                                }
+                                        }
+                                    }
+                                }
+
+                                // cout << "689 : Successfully written" << endl;
+                                file_in[i] = false;
 
                                 rem_bytes[i] = 0;
                                 files_received++;
+
+                                // cout << "Analysing the complete message : " << message << endl;
+
+                                // cout << infile_name[i] << " received successfully and Files received incremented to " << files_received << endl;
+
+                                if(!sockfd2filereq[i].empty()) {
+                                    string req = sockfd2filereq[i].front();
+                                    sockfd2filereq[i].pop();
+
+                                    // cout << "Trying to send : " << req << endl;
+                                    if(send(i, req.c_str(), req.length()+1, 0) == -1) {
+                                        perror("send");
+                                        // cout << "Send error" << endl;
+                                    }
+                                    // else {
+                                    //     cout << "Send request for another file : " << req << endl;
+                                    // }
+                                }
 
                                 // Calculate and store the MD5 hash here
                                 unsigned char hash[MD5_DIGEST_LENGTH];
@@ -731,11 +794,21 @@ int main(int argc, char **argv) {
                 }
             }
         
-            if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !printed) break;
+            // if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !printed) break;
         }
 
-        if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !printed) {
+        // if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && !printed) {
+        if(all_requested && all_responded && (received_2REQs == expected_2REQs) && (received_2RESPs == expected_2RESPs) && (received_DRESPs == expected_DRESPs) && !printed) {
             // cout << "Here" << endl;
+
+            for(auto neighbor : neighbors) {
+                int n_id = neighbor.first;
+                int n_port = neighbor.second;
+                int n_uid = get<2>(neighbor_info[n_id]);
+
+                cout << "Connected to " << n_id << " with unique-ID " << n_uid << " on port " << n_port << endl;
+            }
+
             for(auto file : search_files) {
                 int d = 1, n_uid;
                 if(file_owners[file].empty() && d2file_owners[file].empty()) {
@@ -755,9 +828,12 @@ int main(int argc, char **argv) {
                     string message = "FILEREQ," + to_string(uid) + "," + to_string(id) + "," + file + '$';
 
                     // cout << "Will send on " << uid2sockfd[n_uid] << endl;
-                    if(send(uid2sockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
+                    // if(send(uid2sockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
                         // perror("send");
-                    }
+                    // }
+
+                    sockfd2filereq[uid2sockfd[n_uid]].push(message);
+
                     file_depth[file] = to_string(d);
                     file_owneruid[file] = to_string(n_uid);
                 }
@@ -793,10 +869,13 @@ int main(int argc, char **argv) {
                             d2_outsockfd2id[client_sockfd] = get<1>(*it);
                             string message = "FILEREQ," + to_string(uid) + "," + to_string(id) + "," + file + '$';
                             // cout << "The socketfd is " << client_sockfd << endl;
-                            if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
+                            
+                            // if(send(client_sockfd, message.c_str(), message.length()+1, 0) == -1) {
                             //     perror("send");
                             //     // cout << "Error in line 624" << endl;
-                            }
+                            // }
+
+                            sockfd2filereq[d2_uid2outsockfd[n_uid]].push(message);
 
                             // cout << "Connected to " << n_uid << " and sent : " << message << endl;
 
@@ -813,9 +892,11 @@ int main(int argc, char **argv) {
                     else {
                         string message = "FILEREQ," + to_string(uid) + "," + to_string(id) + "," + file + '$';
                         // cout << "Requesting file on connected depth 2 neighbor on the socket " << d2_uid2outsockfd[n_uid] << endl;
-                        if(send(d2_uid2outsockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
-                            // perror("send");
-                        }
+                        // if(send(d2_uid2outsockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
+                        //     perror("send");
+                        // }
+
+                        sockfd2filereq[d2_uid2outsockfd[n_uid]].push(message);
                     }
                     file_depth[file] = to_string(d);
                     file_owneruid[file] = to_string(n_uid);
@@ -827,6 +908,19 @@ int main(int argc, char **argv) {
             printed = true;
             // break;
 
+            // cout << "Files needed for ID : " << id << " is " << files_needed << endl;
+
+            for(int sock = 0; sock <= fdmax; sock++) {
+                if(!sockfd2filereq[sock].empty()) {
+                    string req = sockfd2filereq[sock].front();
+                    sockfd2filereq[sock].pop();
+                    
+                    if(send(sock, req.c_str(), req.length()+1, 0) == -1) {
+                        // perror("send");
+                    }
+                }
+            }
+
             // If at this point files needed is zero then just sort everyone and print the default message here else do the printing
             // in the next block
             if(files_needed == 0) {
@@ -837,7 +931,11 @@ int main(int argc, char **argv) {
             }
         }
     
-        if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && printed && (files_needed == files_received) && (files_needed != 0) && !hashed) {
+        // if(all_requested && all_responded && all_2responded && (d2sent == num_neighbors*(num_neighbors-1)) && printed && (files_needed == files_received) && (files_needed != 0) && !hashed) {
+        if(all_requested && all_responded && (received_2REQs == expected_2REQs) && (received_2RESPs == expected_2RESPs) && (received_DRESPs == expected_DRESPs) && printed && (files_needed == files_received) && (files_needed != 0) && !hashed) {
+
+            // cout << "Final results" << endl;
+            cout << "";
             for(auto file : search_files) {
                 string out = "Found " + file + " at " + file_owneruid[file] + " with MD5 " + file_hash[file] + " at depth " + file_depth[file];
                 std::cout << out << endl;

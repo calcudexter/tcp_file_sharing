@@ -23,6 +23,7 @@
 #include <set>
 #include <sys/stat.h>
 #include <openssl/md5.h>
+#include <queue>
 
 using namespace std;
 namespace fs = std::filesystem;
@@ -109,6 +110,10 @@ int main(int argc, char **argv) {
 
     sort(my_files.begin(), my_files.end());
 
+    for(auto f : my_files) {
+        cout << f << endl;
+    }
+
     int num_neighbors;
     fin >> num_neighbors;
 
@@ -129,8 +134,12 @@ int main(int argc, char **argv) {
     set<int> unresponded;
     set<int> unrequested;
     bool all_responded = false, all_requested = false;
-    int all_got = 0;
+    // int all_got = 0;
     bool all_printed = false;
+
+    bool phase1_printed = false;
+
+    int files_expected = 0, files_got = 0;
 
     // bool file_in = false;
     map<int, bool> file_in;
@@ -143,6 +152,8 @@ int main(int argc, char **argv) {
     // string infile_name;
     map<int, string> infile_name;
     // Map from sockfd to string
+
+    map<int, queue<string>> sockfd2filereq;
 
     for(ll i = 0; i < num_neighbors; i++) {
         ll n_id, n_port;
@@ -163,6 +174,8 @@ int main(int argc, char **argv) {
     for(ll i = 0; i < num_files_down; i++) {
         fin >> search_files[i];
     }
+
+    sort(search_files, search_files+num_files_down);
 
     // ----------------------
     // Socket programming starts here
@@ -348,7 +361,10 @@ int main(int argc, char **argv) {
                         // printf("I received '%s' on socket %d$", buf, i);
 
                         string message(buf, buf+nbytes);
+                        cout << "";
+                        // if(id == 4) cout << message << endl;
                         // cout << message << endl;
+                        // cout << flush;
 
                         if(!file_in[i]) {
                             int fsind = 0;
@@ -379,7 +395,7 @@ int main(int argc, char **argv) {
                                     n_uid = stoi(words[3]);
 
                                     uid2sockfd[n_uid] = i;
-
+                                    get<0>(neighbor_info[n_id]) = i;
                                     get<2>(neighbor_info[n_id]) = n_uid;
                                 }
                                 else {
@@ -392,8 +408,16 @@ int main(int argc, char **argv) {
                                         for(int i = 0; i < num_files; i++) {
                                             string fn = words[4+i];
 
-                                            if(my_files_set.count(fn)) message += ",YES";
-                                            else message += ",NO";
+                                            // if(id == 5) cout << "406 " << fn << " " << fn.length() << endl;
+
+                                            if(my_files_set.count(fn)) {
+                                                message += ",YES";
+                                                // cout << "Found " << fn << endl;
+                                            }
+                                            else {
+                                                message += ",NO";
+                                                // cout << "Not found " << fn << endl;
+                                            }
                                         }
 
                                         message += '$';
@@ -432,7 +456,24 @@ int main(int argc, char **argv) {
                                                     auto it = min_element(file_owners[search_files[ind]].begin(), file_owners[search_files[ind]].end());
                                                     int n_uid = *it;
 
-                                                    if(send(uid2sockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
+                                                    // if(send(uid2sockfd[n_uid], message.c_str(), message.length()+1, 0) == -1) {
+                                                    //     perror("send");
+                                                    // }
+                                                    sockfd2filereq[uid2sockfd[n_uid]].push(message);
+                                                    files_expected++;
+
+                                                    // cout << "Files expected increased to " << files_expected << endl;
+                                                }
+                                            }
+
+                                            for(int ind = 0; ind < num_neighbors; ind++) {
+                                                int sock = get<0>(neighbor_info[neighbors[ind].first]);
+
+                                                if(!sockfd2filereq[sock].empty()) {
+                                                    string req = sockfd2filereq[sock].front();
+                                                    sockfd2filereq[sock].pop();
+
+                                                    if(send(sock, req.c_str(), req.length()+1, 0) == -1) {
                                                         perror("send");
                                                     }
                                                 }
@@ -441,6 +482,9 @@ int main(int argc, char **argv) {
                                     }
                                     else if(words[0] == "FILEREQ") {
                                         int n_uid = stoi(words[1]), n_id = stoi(words[2]);
+
+                                        // if(n_id == 4) cout << "4 has requested " << msg << endl;
+
                                         string fn = words[3];
 
                                         uintmax_t fsz = fs::file_size(my_dir + fn);
@@ -472,7 +516,9 @@ int main(int argc, char **argv) {
                                         file_in[i] = true;
                                         rem_bytes[i] = stoi(words[2]);
                                         infile_name[i] = words[1];
-                                        all_got++;
+                                        // all_got++;
+                                        files_got++;
+                                        // cout << "Files got increased to " << files_got << endl;
                                         break;
                                     }
                                 }
@@ -513,17 +559,6 @@ int main(int argc, char **argv) {
                             }
                         }
                         else {
-                            // int eof = -1;
-                            // Will use rem bytes next time
-
-                            // for(int i = 0; i < message.length(); i++) {
-                            //     if(message[i] == EOF) {
-                            //         eof = i;
-                            //         break;
-                            //     }
-                            // }
-
-                            // if(eof == -1) {
                             if(rem_bytes[i] > nbytes) {
 
                                 struct stat info;
@@ -565,6 +600,20 @@ int main(int argc, char **argv) {
                                 // cout << out;
 
                                 rem_bytes[i] = 0;
+
+                                if(!sockfd2filereq[i].empty()) {
+                                    string req = sockfd2filereq[i].front();
+                                    sockfd2filereq[i].pop();
+
+                                    // if(id == 4) cout << "Sent the next request : " << req << endl;
+                                    cout << "";
+                                    // cout.flush();
+                                    // cerr.flush();
+
+                                    if(send(i, req.c_str(), req.length()+1, 0) == -1) {
+                                        perror("send");
+                                    }
+                                }
                             }
                         }
                     }
@@ -579,18 +628,32 @@ int main(int argc, char **argv) {
             //     if(cntr == all_got) break;
             // }
         }
-    
-        if(all_requested && all_responded) {
-            int cntr = 0;
-            for(int i = 0; i < num_files_down; i++) {
-                if(!file_owners[search_files[i]].empty()) cntr++;
+
+        if(all_requested && all_responded && !phase1_printed) {
+            for(auto neighbor : neighbors) {
+                int n_id = neighbor.first;
+                int n_port = neighbor.second;
+                int n_uid = get<2>(neighbor_info[n_id]);
+
+                cout << "Connected to " << n_id << " with unique-ID " << n_uid << " on port " << n_port << endl;
             }
-            if(cntr == all_got) {
+
+            phase1_printed = true;
+            // cout << "Printed" << endl;
+        }
+
+        if(all_requested && all_responded) {
+            // int cntr = 0;
+            // for(int i = 0; i < num_files_down; i++) {
+            //     if(!file_owners[search_files[i]].empty()) cntr++;
+            // }
+            if(files_expected == files_got) {
                 // break;
                 if(!all_printed) {
                     // Now print all the resultant output
 
                     for(auto file : search_files) {
+                        // cout << "Gonna print" << endl;
                         int d = 1, n_uid;
                         if(file_owners[file].empty()) {
                             d = 0;

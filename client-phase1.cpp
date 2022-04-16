@@ -99,6 +99,8 @@ int main(int argc, char **argv) {
         fin >> search_files[i];
     }
 
+    sort(search_files, search_files+num_files_down);
+
     // ----------------------
     // Socket programming starts here
 
