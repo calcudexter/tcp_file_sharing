@@ -25,6 +25,7 @@ namespace fs = std::filesystem;
 #define ll long long
 #define BACKLOG 10
 
+
 void sigchld_handler(int s) {
     // waitpid() might overwrite errno, so we save and restore it:
     int saved_errno = errno;
@@ -55,6 +56,8 @@ int main(int argc, char **argv) {
     int id, port, uid;
     fin.open(config_file);
     fin >> id >> port >> uid;
+
+    sleep(2*id);
 
     vector<string> my_files;    
 
@@ -207,83 +210,85 @@ int main(int argc, char **argv) {
         freeaddrinfo(servinfo);
     }
 
-    for(;;) {
-        read_fds = master;
+    if(num_neighbors > 0) {
+        for(;;) {
+            read_fds = master;
 
-        if(select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
-            // perror("select");
-            exit(4);
-        }
+            if(select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
+                // perror("select");
+                exit(4);
+            }
 
-        for(i = 0; i <= fdmax; i++) {
-            if(FD_ISSET(i, &read_fds)) {
-                if(i == listener) {
-                    addrlen = sizeof remoteaddr;
-                    newfd = accept(listener, (struct sockaddr *)&remoteaddr, &addrlen);
+            for(i = 0; i <= fdmax; i++) {
+                if(FD_ISSET(i, &read_fds)) {
+                    if(i == listener) {
+                        addrlen = sizeof remoteaddr;
+                        newfd = accept(listener, (struct sockaddr *)&remoteaddr, &addrlen);
 
-                    if(newfd == -1) {
-                        // perror("accept");
-                    }
-                    else {
-                        FD_SET(newfd, &master);
-
-                        if(newfd > fdmax) {
-                            fdmax = newfd;
-                        }
-
-                        string message = to_string(id) + "," + to_string(port) + "," + to_string(uid);
-                        if(send(newfd, message.c_str(), 16, 0) == -1) {
-                            // perror("send");
-                        }
-
-                        // printf("selectserver: new connection from %s on socket %d\n", inet_ntop(remoteaddr.ss_family, get_in_addr((struct sockaddr *)&remoteaddr), remoteIP, INET6_ADDRSTRLEN), newfd);
-                    }
-                }
-                else {
-                    if((nbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
-                        if(nbytes == 0) {
-                            // printf("selectserver: socket %d hung up\n", i);
+                        if(newfd == -1) {
+                            // perror("accept");
                         }
                         else {
-                            // perror("recv");
+                            FD_SET(newfd, &master);
+
+                            if(newfd > fdmax) {
+                                fdmax = newfd;
+                            }
+
+                            string message = to_string(id) + "," + to_string(port) + "," + to_string(uid);
+                            if(send(newfd, message.c_str(), 16, 0) == -1) {
+                                // perror("send");
+                            }
+
+                            // printf("selectserver: new connection from %s on socket %d\n", inet_ntop(remoteaddr.ss_family, get_in_addr((struct sockaddr *)&remoteaddr), remoteIP, INET6_ADDRSTRLEN), newfd);
                         }
-                        close(i);
-                        FD_CLR(i, &master);
                     }
                     else {
-                        // Successful reception of data
-                        // Parse the buffer and go ahead
-
-                        // printf("I received '%s' on socket %d\n", buf, i);
-
-                        string message(buf, buf+nbytes);
-
-                        int n_id, n_port, n_uid;
-                        int commas[2], itr = 0;
-                        int len = message.length();
-
-                        for(int i = 0; i < len; i++) {
-                            if(message[i] == ',') commas[itr++] = i;
-                            if(itr == 2) break;
+                        if((nbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
+                            if(nbytes == 0) {
+                                // printf("selectserver: socket %d hung up\n", i);
+                            }
+                            else {
+                                // perror("recv");
+                            }
+                            close(i);
+                            FD_CLR(i, &master);
                         }
+                        else {
+                            // Successful reception of data
+                            // Parse the buffer and go ahead
 
-                        n_id = stoi(message.substr(0, commas[0]));
-                        n_port = stoi(message.substr(commas[0]+1, commas[1]-(commas[0]+1)));
-                        n_uid = stoi(message.substr(commas[1]+1, len-(commas[1]+1)));
+                            // printf("I received '%s' on socket %d\n", buf, i);
 
-                        get<2>(neighbor_info[n_id]) = n_uid;
+                            string message(buf, buf+nbytes);
 
-                        unconnected.erase(n_id);
-                        if(unconnected.empty())
-                            break;
+                            int n_id, n_port, n_uid;
+                            int commas[2], itr = 0;
+                            int len = message.length();
+
+                            for(int i = 0; i < len; i++) {
+                                if(message[i] == ',') commas[itr++] = i;
+                                if(itr == 2) break;
+                            }
+
+                            n_id = stoi(message.substr(0, commas[0]));
+                            n_port = stoi(message.substr(commas[0]+1, commas[1]-(commas[0]+1)));
+                            n_uid = stoi(message.substr(commas[1]+1, len-(commas[1]+1)));
+
+                            get<2>(neighbor_info[n_id]) = n_uid;
+
+                            unconnected.erase(n_id);
+                            if(unconnected.empty())
+                                break;
+                        }
                     }
                 }
             }
+        
+        
+            if(unconnected.empty())
+                break;
         }
-    
-    
-        if(unconnected.empty())
-            break;
     }
 
     for(auto neighbor : neighbors) {

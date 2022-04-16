@@ -25,6 +25,7 @@ namespace fs = std::filesystem;
 #define ll long long
 #define BACKLOG 10
 
+
 void sigchld_handler(int s) {
     // waitpid() might overwrite errno, so we save and restore it:
     int saved_errno = errno;
@@ -89,6 +90,8 @@ int main(int argc, char **argv) {
     int id, port, uid;
     fin.open(config_file);
     fin >> id >> port >> uid;
+
+    sleep(2*id);
 
     // cout << "I am " << uid << endl;
 
@@ -272,142 +275,141 @@ int main(int argc, char **argv) {
         freeaddrinfo(servinfo);
     }
 
-    for(;;) {
-        read_fds = master;
+    if(num_neighbors > 0) {
+        for(;;) {
+            read_fds = master;
 
-        if(select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
-            // perror("select");
-            exit(4);
-        }
+            if(select(fdmax+1, &read_fds, NULL, NULL, NULL) == -1) {
+                // perror("select");
+                exit(4);
+            }
 
-        for(i = 0; i <= fdmax; i++) {
-            if(FD_ISSET(i, &read_fds)) {
-                if(i == listener) {
-                    addrlen = sizeof remoteaddr;
-                    newfd = accept(listener, (struct sockaddr *)&remoteaddr, &addrlen);
+            for(i = 0; i <= fdmax; i++) {
+                if(FD_ISSET(i, &read_fds)) {
+                    if(i == listener) {
+                        addrlen = sizeof remoteaddr;
+                        newfd = accept(listener, (struct sockaddr *)&remoteaddr, &addrlen);
 
-                    if(newfd == -1) {
-                        // perror("accept");
-                    }
-                    else {
-                        FD_SET(newfd, &master);
-
-                        if(newfd > fdmax) {
-                            fdmax = newfd;
-                        }
-
-                        string message = to_string(id) + "," + to_string(port) + "," + to_string(uid) + '$';
-                        if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
-                            // perror("send");
-                        }
-
-                        message = "REQ," + to_string(uid) + "," + to_string(id) + "," + to_string(num_files_down);
-
-                        int len = message.length();
-
-                        for(auto file : search_files) {
-                            message += "," + file;
-                            len += file.length() + 1;
-                        }
-
-                        message += '$';
-
-                        if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
-                            perror("send");
-                        }
-
-                        // printf("selectserver: new connection from %s on socket %d$", inet_ntop(remoteaddr.ss_family, get_in_addr((struct sockaddr *)&remoteaddr), remoteIP, INET6_ADDRSTRLEN), newfd);
-                    }
-                }
-                else {
-                    if((nbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
-                        if(nbytes == 0) {
-                            // printf("selectserver: socket %d hung up$", i);
+                        if(newfd == -1) {
+                            // perror("accept");
                         }
                         else {
-                            // perror("recv");
+                            FD_SET(newfd, &master);
+
+                            if(newfd > fdmax) {
+                                fdmax = newfd;
+                            }
+
+                            string message = to_string(id) + "," + to_string(port) + "," + to_string(uid) + '$';
+                            if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
+                                // perror("send");
+                            }
+
+                            message = "REQ," + to_string(uid) + "," + to_string(id) + "," + to_string(num_files_down);
+
+                            int len = message.length();
+
+                            for(auto file : search_files) {
+                                message += "," + file;
+                                len += file.length() + 1;
+                            }
+
+                            message += '$';
+
+                            if(send(newfd, message.c_str(), message.length()+1, 0) == -1) {
+                                perror("send");
+                            }
+
+                            // printf("selectserver: new connection from %s on socket %d$", inet_ntop(remoteaddr.ss_family, get_in_addr((struct sockaddr *)&remoteaddr), remoteIP, INET6_ADDRSTRLEN), newfd);
                         }
-                        close(i);
-                        FD_CLR(i, &master);
                     }
                     else {
-                        // Successful reception of data
-                        // Parse the buffer and go ahead
-
-                        // printf("I received '%s' on socket %d$", buf, i);
-
-                        string message(buf, buf+nbytes);
-                        // cout << "Got this message " << message << endl;
-
-                        vector<string> msgs = splitmsg(message);
-
-                        // Loop to clean the messages
-                        for(int i = 1; i < msgs.size(); i++) {
-                            if(msgs[i].length())
-                                msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
-                        }
-
-                        chats[sockfd2ID[i]].insert(chats[sockfd2ID[i]].end(), msgs.begin(), msgs.end());
-                        
-                        for(auto msg : msgs) {
-                            vector<string> words = splitstring(msg);
-                            if(words[0] != "REQ" && words[0] != "RESP") {
-                                int n_id, n_port, n_uid;
-
-                                n_id = stoi(words[0]);
-                                sockfd2ID[i] = n_id;
-                                n_port = stoi(words[1]);
-                                n_uid = stoi(words[2]);
-
-                                get<2>(neighbor_info[n_id]) = n_uid;
+                        if((nbytes = recv(i, buf, sizeof buf, 0)) <= 0) {
+                            if(nbytes == 0) {
+                                // printf("selectserver: socket %d hung up$", i);
                             }
                             else {
-                                if(words[0] == "REQ") {
-                                    int n_uid = stoi(words[1]), n_id = stoi(words[2]), num_files = stoi(words[3]);
+                                // perror("recv");
+                            }
+                            close(i);
+                            FD_CLR(i, &master);
+                        }
+                        else {
+                            // Successful reception of data
+                            // Parse the buffer and go ahead
 
-                                    string message = "RESP," + to_string(uid) + "," + to_string(id) +"," + to_string(num_files);
+                            // printf("I received '%s' on socket %d$", buf, i);
 
-                                    for(int i = 0; i < num_files; i++) {
-                                        string fn = words[4+i];
+                            string message(buf, buf+nbytes);
+                            // cout << "Got this message " << message << endl;
 
-                                        if(my_files_set.count(fn)) message += ",YES";
-                                        else message += ",NO";
-                                    }
+                            vector<string> msgs = splitmsg(message);
 
-                                    message += '$';
+                            // Loop to clean the messages
+                            for(int i = 1; i < msgs.size(); i++) {
+                                if(msgs[i].length())
+                                    msgs[i] = msgs[i].substr(1, msgs[i].length()-1);
+                            }
 
-                                    if(send(i, message.c_str(), message.length()+1, 0) == -1) {
-                                        perror("send");
-                                    }
+                            chats[sockfd2ID[i]].insert(chats[sockfd2ID[i]].end(), msgs.begin(), msgs.end());
+                            
+                            for(auto msg : msgs) {
+                                vector<string> words = splitstring(msg);
+                                if(words[0] != "REQ" && words[0] != "RESP") {
+                                    int n_id, n_port, n_uid;
 
-                                    unrequested.erase(n_id);
-                                    if(unrequested.empty()) all_requested = true;
+                                    n_id = stoi(words[0]);
+                                    sockfd2ID[i] = n_id;
+                                    n_port = stoi(words[1]);
+                                    n_uid = stoi(words[2]);
+
+                                    get<2>(neighbor_info[n_id]) = n_uid;
                                 }
-                                else if(words[0] == "RESP") {
-                                    int n_uid = stoi(words[1]), n_id = stoi(words[2]), num_files = stoi(words[3]);
+                                else {
+                                    if(words[0] == "REQ") {
+                                        int n_uid = stoi(words[1]), n_id = stoi(words[2]), num_files = stoi(words[3]);
 
-                                    for(int i = 0; i < num_files; i++) {
-                                        string resp = words[4+i];
+                                        string message = "RESP," + to_string(uid) + "," + to_string(id) +"," + to_string(num_files);
 
-                                        if(resp == "YES") {
-                                            file_owners[search_files[i]].insert(n_uid);
+                                        for(int i = 0; i < num_files; i++) {
+                                            string fn = words[4+i];
+
+                                            if(my_files_set.count(fn)) message += ",YES";
+                                            else message += ",NO";
                                         }
+
+                                        message += '$';
+
+                                        if(send(i, message.c_str(), message.length()+1, 0) == -1) {
+                                            perror("send");
+                                        }
+
+                                        unrequested.erase(n_id);
+                                        if(unrequested.empty()) all_requested = true;
                                     }
-                                
-                                    unresponded.erase(n_id);
-                                    if(unresponded.empty()) all_responded = true;
+                                    else if(words[0] == "RESP") {
+                                        int n_uid = stoi(words[1]), n_id = stoi(words[2]), num_files = stoi(words[3]);
+
+                                        for(int i = 0; i < num_files; i++) {
+                                            string resp = words[4+i];
+
+                                            if(resp == "YES") {
+                                                file_owners[search_files[i]].insert(n_uid);
+                                            }
+                                        }
+                                    
+                                        unresponded.erase(n_id);
+                                        if(unresponded.empty()) all_responded = true;
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                if(all_requested && all_responded) break;   
             }
-        
             if(all_requested && all_responded) break;
-        
         }
-    
-        if(all_requested && all_responded) break;
     }
 
     // Now print all the resultant output
